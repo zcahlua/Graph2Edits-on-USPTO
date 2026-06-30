@@ -2,19 +2,9 @@
 import argparse, csv, json, os, random, zipfile, tempfile, shutil, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collections import Counter, defaultdict
+import pandas as pd
+from rdkit import Chem
 from utils.dataset_config import RXN_KEY, SPLITS, str2bool
-
-Chem = None
-pd = None
-
-def require_runtime_deps():
-    global Chem, pd
-    if Chem is None:
-        from rdkit import Chem as _Chem
-        Chem = _Chem
-    if pd is None:
-        import pandas as _pd
-        pd = _pd
 
 REACTION_COLUMNS = [RXN_KEY, 'reactions', 'reaction', 'rxn', 'rxn_smiles', 'reaction_smiles']
 
@@ -93,54 +83,27 @@ def read_file(path, fmt, reaction_column=None):
             rows.append({'reaction': line.split()[0], 'id': None})
     return rows
 
-def random_split_rows(rows, train_frac, valid_frac, seed):
-    rows = list(rows)
-    random.Random(seed).shuffle(rows)
-    n = len(rows)
-    if n >= 3:
-        n_valid = max(1, int(round(n * valid_frac)))
-        n_test = max(1, int(round(n * (1.0 - train_frac - valid_frac))))
-        if n_valid + n_test >= n:
-            n_valid = 1
-            n_test = 1
-        n_train = n - n_valid - n_test
-    else:
-        n_train = int(n * train_frac)
-        n_valid = int(n * valid_frac)
-        n_test = n - n_train - n_valid
-    return {'train': rows[:n_train], 'valid': rows[n_train:n_train+n_valid], 'test': rows[n_train+n_valid:n_train+n_valid+n_test]}
-
-
-def assert_nonempty_splits(result, allow_empty_splits):
-    empty = [split for split in SPLITS if len(result[split]) == 0]
-    if empty and not allow_empty_splits:
-        raise SystemExit('Empty output split(s): %s. Provide train/valid/test inputs, more rows, or pass --allow_empty_splits true for smoke/debug use.' % ', '.join(empty))
-
-
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--input', required=True); p.add_argument('--format', choices=['auto','jin','deepchem','graph2edits'], default='auto')
     p.add_argument('--out', default='data/uspto_mit'); p.add_argument('--include_reagents', type=str2bool, default=False)
     p.add_argument('--split', choices=['predefined','random'], default='predefined'); p.add_argument('--train_frac', type=float, default=0.8); p.add_argument('--valid_frac', type=float, default=0.1); p.add_argument('--test_frac', type=float, default=0.1)
-    p.add_argument('--seed', type=int, default=42); p.add_argument('--limit_rows', type=int); p.add_argument('--allow_multi_product', type=str2bool, default=False); p.add_argument('--allow_empty_splits', type=str2bool, default=False); p.add_argument('--reaction_column')
-    a=p.parse_args(); require_runtime_deps(); os.makedirs(a.out, exist_ok=True)
+    p.add_argument('--seed', type=int, default=42); p.add_argument('--limit_rows', type=int); p.add_argument('--allow_multi_product', type=str2bool, default=False); p.add_argument('--reaction_column')
+    a=p.parse_args(); os.makedirs(a.out, exist_ok=True)
     tmp=None; result={s:[] for s in SPLITS}; all_rows=[]; report={'files_read':[], 'rows_read':0, 'rows_kept':0, 'rows_rejected':0, 'rejection_counts_by_reason':{}, 'atom_map_statistics':{}, 'include_reagents':a.include_reagents}
     try:
         ex=extract_inputs(a.input); files,tmp=(ex if isinstance(ex, tuple) else (ex,None))
         predefined=False
         for f in files:
             sp=detect_split(f); rows=read_file(f, a.format, a.reaction_column); report['files_read'].append(f); report['rows_read']+=len(rows)
-            for row in rows:
-                if a.limit_rows is not None and len(all_rows) >= a.limit_rows:
-                    break
+            for row in rows[:a.limit_rows] if a.limit_rows else rows:
                 row['_split']=sp; all_rows.append(row)
                 if sp: predefined=True
-            if a.limit_rows is not None and len(all_rows) >= a.limit_rows:
-                break
         if a.split=='predefined' and predefined:
             split_rows={s:[r for r in all_rows if r['_split']==s] for s in SPLITS}; report['split_method']='predefined'
         else:
-            split_rows=random_split_rows(all_rows, a.train_frac, a.valid_frac, a.seed); report['split_method']='random'
+            random.Random(a.seed).shuffle(all_rows); n=len(all_rows); nt=int(n*a.train_frac); nv=int(n*a.valid_frac)
+            split_rows={'train':all_rows[:nt], 'valid':all_rows[nt:nt+nv], 'test':all_rows[nt+nv:]}; report['split_method']='random'
         rejects=[]; reason_counts=Counter(); atom_stats=Counter()
         for sp, rows in split_rows.items():
             for i,row in enumerate(rows):
@@ -152,7 +115,6 @@ def main():
                     result[sp].append(out)
                 except Exception as e:
                     reason=str(e); reason_counts[reason]+=1; row2=dict(row); row2['reason']=reason; rejects.append(row2)
-        assert_nonempty_splits(result, a.allow_empty_splits)
         for sp in SPLITS: pd.DataFrame(result[sp], columns=['id', RXN_KEY, 'class']).dropna(axis=1, how='all').to_csv(os.path.join(a.out,'raw_%s.csv'%sp), index=False)
         pd.DataFrame(rejects).to_csv(os.path.join(a.out,'conversion_rejected.csv'), index=False)
         report.update({'rows_kept':sum(len(v) for v in result.values()), 'rows_rejected':len(rejects), 'rejection_counts_by_reason':dict(reason_counts), 'split_sizes':{k:len(v) for k,v in result.items()}, 'atom_map_statistics':dict(atom_stats)})

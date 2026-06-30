@@ -172,8 +172,7 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]):
 
         print(Counter(counter))
         print(f'The cover rate is {cover_num}/{len(rxns_data)}')
-        coverage = {'covered': cover_num, 'total': len(rxns_data)}
-        args._coverage = coverage
+        args._coverage = {'covered': cover_num, 'total': len(rxns_data)}
         joblib.dump(rxns_data, save_file, compress=3)
         saved_count = len(rxns_data)
 
@@ -206,9 +205,8 @@ def main():
     df = pd.read_csv(filename)
     rxn_classes = df['class'] if args.use_rxn_class else []
     rxn_ids = df['id'] if 'id' in df.columns else []
-    prep_report = preprocessing(rxns=df[RXN_KEY], args=args, rxn_classes=rxn_classes, rxns_id=rxn_ids)
-    report = {'mode': args.mode, 'input_file': filename, 'counts_read': int(len(df))}
-    report.update(prep_report)
+    preprocessing(rxns=df[RXN_KEY], args=args, rxn_classes=rxn_classes, rxns_id=rxn_ids)
+    report = {'mode': args.mode, 'input_file': filename, 'counts_read': int(len(df)), 'counts_kept': None, 'coverage': getattr(args, '_coverage', None)}
     os.makedirs('data/%s/%s' % (args.dataset, args.mode), exist_ok=True)
     json.dump(report, open('data/%s/%s/preprocess_report.json' % (args.dataset, args.mode), 'w'), indent=2)
 

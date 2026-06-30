@@ -94,7 +94,6 @@ def prepare_data(args: Any) -> None:
     batch_graphs = []
     batch_num = 0
     report = {"processed": 0, "skipped_too_long": 0, "skipped_unknown_edit": 0, "skipped_invalid_intermediate": 0, "saved_batch_count": 0}
-    train_edits = set(joblib.load(f'data/{args.dataset}/train/bond_vocab.txt') + joblib.load(f'data/{args.dataset}/train/atom_lg_vocab.txt') + ['Terminate'])
 
     if args.use_rxn_class:
         savedir = f'data/{args.dataset}/{args.mode}/with_rxn_class/'
@@ -130,6 +129,7 @@ def prepare_data(args: Any) -> None:
             continue
 
         # validate edit labels against train vocabularies before graph generation
+        train_edits = set(joblib.load(f'data/{args.dataset}/train/bond_vocab.txt') + joblib.load(f'data/{args.dataset}/train/atom_lg_vocab.txt') + ['Terminate'])
         if any(edit not in train_edits for edit in rxn_data.edits):
             report['skipped_unknown_edit'] += 1
             continue
@@ -153,11 +153,10 @@ def prepare_data(args: Any) -> None:
                     final_smi = None
                     break
             else:
+                graph = RxnGraph(prod_mol=Chem.Mol(int_mol), edit_to_apply=edit,
+                                 edit_atom=rxn_data.edits_atom[i], reac_mol=Chem.Mol(r_mol), rxn_class=rxn_data.rxn_class, use_rxn_class=args.use_rxn_class)
+                graph_seq.append(graph)
                 try:
-                    graph = RxnGraph(prod_mol=Chem.Mol(int_mol), edit_to_apply=edit,
-                                     edit_atom=rxn_data.edits_atom[i], reac_mol=Chem.Mol(r_mol),
-                                     rxn_class=rxn_data.rxn_class, use_rxn_class=args.use_rxn_class)
-                    graph_seq.append(graph)
                     int_mol = apply_edit_to_mol(Chem.Mol(int_mol), edit, rxn_data.edits_atom[i])
                 except Exception:
                     report['skipped_invalid_intermediate'] += 1

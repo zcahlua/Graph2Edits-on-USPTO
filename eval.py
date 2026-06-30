@@ -56,28 +56,18 @@ def canonical_reactant_set(smi):
         return None
 
 
-def _highest_epoch_checkpoint(exp_dir):
-    epochs = [f for f in os.listdir(exp_dir) if f.startswith('epoch_') and f.endswith('.pt')]
-    epochs.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
-    if not epochs:
-        raise IOError('No checkpoints found in %s; expected best.pt, latest.pt, or epoch_*.pt' % exp_dir)
-    return os.path.join(exp_dir, epochs[-1])
-
-
 def resolve_checkpoint(exp_dir, spec):
     if spec == 'best':
-        best = os.path.join(exp_dir, 'best.pt')
-        if os.path.exists(best):
-            return best
-        latest = os.path.join(exp_dir, 'latest.pt')
-        if os.path.exists(latest):
-            return latest
-        return _highest_epoch_checkpoint(exp_dir)
+        return os.path.join(exp_dir, 'best.pt')
     if spec == 'latest':
         latest = os.path.join(exp_dir, 'latest.pt')
         if os.path.exists(latest):
             return latest
-        return _highest_epoch_checkpoint(exp_dir)
+        epochs = [f for f in os.listdir(exp_dir) if f.startswith('epoch_') and f.endswith('.pt')]
+        epochs.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
+        if not epochs:
+            raise IOError('No epoch checkpoints found in %s' % exp_dir)
+        return os.path.join(exp_dir, epochs[-1])
     if spec.startswith('epoch_') and spec.endswith('.pt'):
         return os.path.join(exp_dir, spec)
     return spec
