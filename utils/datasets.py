@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Optional, Tuple
 
 import joblib
@@ -11,11 +12,14 @@ from utils.generate_edits import ReactionData
 class RetroEditDataset(Dataset):
     def __init__(self, data_dir: str, **kwargs):
         self.data_dir = data_dir
-        self.data_files = [
+        def batch_key(path):
+            m = re.search(r'batch-(\d+)\.pt$', path)
+            return int(m.group(1)) if m else 10**12
+        self.data_files = sorted([
             os.path.join(self.data_dir, file)
             for file in os.listdir(self.data_dir)
-            if "batch-" in file
-        ]
+            if file.startswith('batch-') and file.endswith('.pt')
+        ], key=batch_key)
         self.__dict__.update(**kwargs)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor]:

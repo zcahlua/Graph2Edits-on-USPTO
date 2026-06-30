@@ -9,6 +9,7 @@ import torch
 from rdkit import Chem, RDLogger
 
 from models import Graph2Edits, BeamSearch
+from utils.dataset_config import add_bool_arg, validate_rxn_class
 lg = RDLogger.logger()
 lg.setLevel(4)
 
@@ -37,21 +38,59 @@ def canonicalize_p(smi):
     return p_smi
 
 
+def canonical_reactant_set(smi):
+    try:
+        frags = []
+        for frag in smi.split('.'):
+            mol = Chem.MolFromSmiles(frag)
+            if mol is None:
+                return None
+            for atom in mol.GetAtoms():
+                atom.ClearProp('molAtomMapNumber')
+            mol = Chem.MolFromSmiles(Chem.MolToSmiles(mol))
+            if mol is None:
+                return None
+            frags.append(Chem.MolToSmiles(mol, isomericSmiles=True))
+        return set(frags)
+    except Exception:
+        return None
+
+
+def resolve_checkpoint(exp_dir, spec):
+    if spec == 'best':
+        return os.path.join(exp_dir, 'best.pt')
+    if spec == 'latest':
+        latest = os.path.join(exp_dir, 'latest.pt')
+        if os.path.exists(latest):
+            return latest
+        epochs = [f for f in os.listdir(exp_dir) if f.startswith('epoch_') and f.endswith('.pt')]
+        epochs.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
+        if not epochs:
+            raise IOError('No epoch checkpoints found in %s' % exp_dir)
+        return os.path.join(exp_dir, epochs[-1])
+    if spec.startswith('epoch_') and spec.endswith('.pt'):
+        return os.path.join(exp_dir, spec)
+    return spec
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='USPTO_50k',
                         help='dataset: USPTO_50k or USPTO_full')
-    parser.add_argument("--use_rxn_class", default=False,
-                        action='store_true', help='Whether to use rxn_class')
+    add_bool_arg(parser, '--use_rxn_class', default=False, help='Whether to use rxn_class')
     parser.add_argument('--experiments', type=str, default='27-06-2022--10-27-22',
                         help='Name of edits prediction experiment')
     parser.add_argument('--beam_size', type=int,
                         default=10, help='Beam search width')
     parser.add_argument('--max_steps', type=int, default=9,
                         help='maximum number of edit steps')
+    parser.add_argument('--checkpoint', default='best', help='best, latest, epoch_N.pt, or path')
 
     args = parser.parse_args()
     args.dataset = args.dataset.lower()
+    try:
+        validate_rxn_class(args.dataset, args.use_rxn_class)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     data_dir = os.path.join(ROOT_DIR, 'data', f'{args.dataset}', 'test')
     test_file = os.path.join(data_dir, 'test.file.kekulized')
@@ -63,7 +102,8 @@ def main():
         exp_dir = os.path.join(
             ROOT_DIR, 'experiments', f'{args.dataset}', 'without_rxn_class', f'{args.experiments}')
 
-    checkpoint = torch.load(os.path.join(exp_dir, 'epoch_123.pt'))
+    checkpoint_path = resolve_checkpoint(exp_dir, args.checkpoint)
+    checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
     config = checkpoint['saveables']
 
     model = Graph2Edits(**config, device=DEVICE)
@@ -94,11 +134,7 @@ def main():
             counter.append(edit_steps)
 
             r, p = rxn_smi.split('>>')
-            r_mol = Chem.MolFromSmiles(r)
-            [a.ClearProp('molAtomMapNumber') for a in r_mol.GetAtoms()]
-            r_mol = Chem.MolFromSmiles(Chem.MolToSmiles(r_mol))
-            r_smi = Chem.MolToSmiles(r_mol, isomericSmiles=True)
-            r_set = set(r_smi.split('.'))
+            r_set = canonical_reactant_set(r)
 
             with torch.no_grad():
                 top_k_results = beam_model.run_search(
@@ -110,8 +146,8 @@ def main():
             for beam_idx, path in enumerate(top_k_results):
                 pred_smi = path['final_smi']
                 prob = path['prob']
-                pred_set = set(pred_smi.split('.'))
-                correct = pred_set == r_set
+                pred_set = canonical_reactant_set(pred_smi)
+                correct = pred_set is not None and pred_set == r_set
                 str_edits = '|'.join(f'({str(edit)};{p})'for edit, p in zip(
                     path['rxn_actions'], path['edits_prob']))
                 fp.write(
@@ -125,13 +161,13 @@ def main():
                 edit_steps_cor.append(edit_steps)
 
             for edit in rxn_data.edits:
-                if edit[1] == (1, 1) or edit[1] == (1, 2) or edit[1] == (0, 1) or edit[1] == (0, 2) or edit[1] == (2, 2) or edit[1] == (2, 3):
+                if edit != 'Terminate' and len(edit) > 1 and (edit[1] == (1, 1) or edit[1] == (1, 2) or edit[1] == (0, 1) or edit[1] == (0, 2) or edit[1] == (2, 2) or edit[1] == (2, 3)):
                     stereo_rxn.append(idx)
                     if beam_matched:
                         stereo_rxn_cor.append(idx)
 
             msg = 'average score'
-            for beam_idx in [1, 3, 5, 10]:
+            for beam_idx in [k for k in [1, 3, 5, 10] if k <= args.beam_size]:
                 match_acc = np.sum(top_k[:beam_idx]) / (idx + 1)
                 msg += ', t%d: %.4f' % (beam_idx, match_acc)
             p_bar.set_description(msg)
@@ -143,6 +179,9 @@ def main():
             f'edit_steps_reaction_prediction_correct:{edit_steps_correct}\n')
         fp.write(f'stereo_reaction_idx:{stereo_rxn}\n')
         fp.write((f'stereo_reaction_prediction_correct:{stereo_rxn_cor}\n'))
+        summary = 'final top-k: ' + ', '.join(['t%d %.4f' % (k, np.sum(top_k[:k]) / max(1, len(test_data))) for k in [x for x in [1,3,5,10] if x <= args.beam_size]])
+        print(summary)
+        fp.write(summary + '\n')
 
 
 if __name__ == '__main__':
