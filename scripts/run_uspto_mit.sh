@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# To download the original USPTO-MIT / USPTO-480K archive:
+# bash scripts/download_uspto_mit.sh
+#
+# Primary source:
+# https://github.com/wengong-jin/nips17-rexgen/raw/master/USPTO/data.zip
 set -euo pipefail
 DATA_IN=${1:-data/raw_uspto_mit}
 OUT=${2:-data/uspto_mit}
