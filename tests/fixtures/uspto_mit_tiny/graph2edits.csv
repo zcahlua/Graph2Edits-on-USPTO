@@ -1,0 +1,4 @@
+id,reactants>reagents>production
+r1,[CH3:1][CH2:2][CH3:3]>>[CH3:1][CH2:2][CH3:3]
+r2,[CH3:4][CH2:5][CH3:6]>>[CH3:4][CH2:5][CH3:6]
+r3,[CH3:7][CH2:8][CH3:9]>>[CH3:7][CH2:8][CH3:9]
