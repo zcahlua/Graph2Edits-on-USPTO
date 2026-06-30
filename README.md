@@ -41,6 +41,57 @@ python eval.py --dataset uspto_50k --use_rxn_class False or True --experiments 2
 ```
 This will display the results for reaction class unknown and known setting
 
+## Downloading USPTO-MIT / USPTO-480K
+
+The recommended source for USPTO-MIT / USPTO-480K is the original Jin/WLN NIPS 2017 repository:
+
+- Source repository: https://github.com/wengong-jin/nips17-rexgen
+- Dataset page: https://github.com/wengong-jin/nips17-rexgen/blob/master/USPTO/data.zip
+- Direct download: https://github.com/wengong-jin/nips17-rexgen/raw/master/USPTO/data.zip
+
+This archive contains the predefined train/dev/test split with about 480K fully atom-mapped reactions. Each line contains a reaction SMILES followed by reaction-center metadata separated by whitespace. For Graph2Edits preprocessing, use only the first whitespace-separated field, the reaction SMILES.
+
+Download:
+
+```bash
+mkdir -p data/raw_uspto_mit
+
+curl -L \
+  -o data/raw_uspto_mit/data.zip \
+  https://github.com/wengong-jin/nips17-rexgen/raw/master/USPTO/data.zip
+```
+
+or:
+
+```bash
+mkdir -p data/raw_uspto_mit
+
+wget \
+  -O data/raw_uspto_mit/data.zip \
+  https://github.com/wengong-jin/nips17-rexgen/raw/master/USPTO/data.zip
+```
+
+Then convert it for Graph2Edits:
+
+```bash
+python scripts/convert_uspto_mit.py \
+  --input data/raw_uspto_mit/data.zip \
+  --format jin \
+  --out data/uspto_mit \
+  --include_reagents false \
+  --split predefined
+```
+
+Then continue with the normal USPTO-MIT pipeline:
+
+```bash
+bash scripts/run_uspto_mit.sh data/raw_uspto_mit/data.zip
+```
+
+Do not commit `data/raw_uspto_mit/data.zip` or any extracted USPTO-MIT data files.
+
+DeepChem also provides a USPTO_MIT CSV mirror, but the Jin/WLN `data.zip` is the recommended source for this Graph2Edits pipeline because it is documented as fully atom-mapped and includes the predefined train/dev/test split.
+
 ## Running Graph2Edits on USPTO-MIT / USPTO-480k
 
 USPTO-MIT is supported as dataset name `uspto_mit`. The converter accepts mapped reaction SMILES in Jin/WLN text files (first whitespace token), DeepChem CSV files with a `reactions` column, or existing Graph2Edits CSV files with `reactants>reagents>production`. Atom maps are required: product atoms must have nonzero unique atom-map numbers and every product atom map must appear on the reactant side. The workflow does not add atom maps and `uspto_mit` has no default reaction-class labels, so do not use `--use_rxn_class`.
