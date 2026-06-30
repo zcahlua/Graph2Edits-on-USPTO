@@ -108,7 +108,18 @@ def prepare_data(args: Any) -> None:
         r, p = rxn_smi.split('>>')
         r_mol = Chem.MolFromSmiles(r)
         p_mol = Chem.MolFromSmiles(p)
-        Chem.Kekulize(p_mol)
+        if r_mol is None or p_mol is None:
+            report['skipped_invalid_intermediate'] += 1
+            print(f'Invalid reactant or product molecule. Skipping reaction {idx}')
+            sys.stdout.flush()
+            continue
+        try:
+            Chem.Kekulize(p_mol)
+        except Exception:
+            report['skipped_invalid_intermediate'] += 1
+            print(f'Failed to kekulize product molecule. Skipping reaction {idx}')
+            sys.stdout.flush()
+            continue
 
         if len(rxn_data.edits) > args.max_steps:
             report['skipped_too_long'] += 1
@@ -129,15 +140,18 @@ def prepare_data(args: Any) -> None:
                 report['skipped_invalid_intermediate'] += 1
                 break
             if edit == 'Terminate':
-                graph = RxnGraph(prod_mol=Chem.Mol(
-                    int_mol), edit_to_apply=edit, reac_mol=Chem.Mol(r_mol), rxn_class=rxn_data.rxn_class, use_rxn_class=args.use_rxn_class)
-                graph_seq.append(graph)
-                edit_exe = Termination(action_vocab='Terminate')
                 try:
+                    graph = RxnGraph(prod_mol=Chem.Mol(int_mol), edit_to_apply=edit,
+                                     reac_mol=Chem.Mol(r_mol), rxn_class=rxn_data.rxn_class,
+                                     use_rxn_class=args.use_rxn_class)
+                    graph_seq.append(graph)
+                    edit_exe = Termination(action_vocab='Terminate')
                     pred_mol = edit_exe.apply(Chem.Mol(int_mol))
                     final_smi = Chem.MolToSmiles(pred_mol)
-                except Exception as e:
+                except Exception:
+                    report['skipped_invalid_intermediate'] += 1
                     final_smi = None
+                    break
             else:
                 graph = RxnGraph(prod_mol=Chem.Mol(int_mol), edit_to_apply=edit,
                                  edit_atom=rxn_data.edits_atom[i], reac_mol=Chem.Mol(r_mol), rxn_class=rxn_data.rxn_class, use_rxn_class=args.use_rxn_class)

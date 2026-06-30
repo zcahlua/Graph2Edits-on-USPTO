@@ -21,19 +21,24 @@ def check_edits(edits: List):
     return True
 
 
-def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> None:
+def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]):
     """
     preprocess reactions data to get edits
     """
     rxns_data = []
     counter = []
     all_edits = {}
+    skip_reasons = Counter()
 
     savedir = f'data/{args.dataset}/{args.mode}'
     os.makedirs(savedir, exist_ok=True)
 
     for idx, rxn_smi in enumerate(rxns):
-        r, p = rxn_smi.split('>>')
+        try:
+            r, p = rxn_smi.split('>>')
+        except ValueError:
+            skip_reasons['invalid_reaction_format'] += 1
+            continue
         prod_mol = Chem.MolFromSmiles(p)
 
         if (prod_mol is None) or (prod_mol.GetNumAtoms() <= 1) or (prod_mol.GetNumBonds() <= 1):
@@ -41,6 +46,7 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
                 f'Product has 0 or 1 atom or 1 bond, Skipping reaction {idx}')
             print()
             sys.stdout.flush()
+            skip_reasons['invalid_or_small_product'] += 1
             continue
 
         react_mol = Chem.MolFromSmiles(r)
@@ -50,6 +56,7 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
                 f'Reactant has 0 or 1 atom or 1 bond, Skipping reaction {idx}')
             print()
             sys.stdout.flush()
+            skip_reasons['invalid_or_small_reactant'] += 1
             continue
 
         try:
@@ -61,6 +68,11 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
             print(f'Failed to extract reaction data, skipping reaction {idx}')
             print()
             sys.stdout.flush()
+            skip_reasons['edit_extraction_failed'] += 1
+            continue
+
+        if rxn_data is None:
+            skip_reasons['edit_extraction_failed'] += 1
             continue
 
         edits_accepted = check_edits(rxn_data.edits)
@@ -68,6 +80,7 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
             print(f'Edit: Add new bond. Skipping reaction {idx}')
             print()
             sys.stdout.flush()
+            skip_reasons['add_bond_edit'] += 1
             continue
 
         # if args.dataset == 'uspto_full':
@@ -123,6 +136,7 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
                     print(
                         f'The number of {edit} in training set is very small, skipping reaction')
                     rxn_data = None
+                    skip_reasons['rare_leaving_group'] += 1
             if rxn_data is not None:
                 counter.append(len(rxn_data.edits))
                 filter_rxns_data.append(rxn_data)
@@ -134,6 +148,8 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
         joblib.dump(bond_edits, os.path.join(savedir, 'bond_vocab.txt'))
         joblib.dump(lg_edits, os.path.join(savedir, 'lg_vocab.txt'))
         joblib.dump(atom_lg_edits, os.path.join(savedir, 'atom_lg_vocab.txt'))
+        coverage = None
+        saved_count = len(filter_rxns_data)
     else:
         bond_vocab_file = f'data/{args.dataset}/train/bond_vocab.txt'
         atom_vocab_file = f'data/{args.dataset}/train/atom_lg_vocab.txt'
@@ -158,6 +174,9 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
         print(f'The cover rate is {cover_num}/{len(rxns_data)}')
         args._coverage = {'covered': cover_num, 'total': len(rxns_data)}
         joblib.dump(rxns_data, save_file, compress=3)
+        saved_count = len(rxns_data)
+
+    return {'counts_kept': saved_count, 'counts_skipped': sum(skip_reasons.values()), 'skip_reasons': dict(skip_reasons), 'edit_step_histogram': dict(Counter(counter)), 'coverage': coverage}
 
 
 def main():
