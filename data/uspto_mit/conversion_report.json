@@ -1,0 +1,24 @@
+{
+  "files_read": [
+    "tests/fixtures/uspto_mit_tiny\\deepchem.csv",
+    "tests/fixtures/uspto_mit_tiny\\graph2edits.csv",
+    "tests/fixtures/uspto_mit_tiny\\jin_test.txt",
+    "tests/fixtures/uspto_mit_tiny\\jin_train.txt",
+    "tests/fixtures/uspto_mit_tiny\\jin_valid.txt"
+  ],
+  "rows_read": 10,
+  "rows_kept": 4,
+  "rows_rejected": 0,
+  "rejection_counts_by_reason": {},
+  "atom_map_statistics": {
+    "product_atoms": 12,
+    "reactant_zero_maps": 4
+  },
+  "include_reagents": false,
+  "split_method": "predefined",
+  "split_sizes": {
+    "train": 2,
+    "valid": 1,
+    "test": 1
+  }
+}

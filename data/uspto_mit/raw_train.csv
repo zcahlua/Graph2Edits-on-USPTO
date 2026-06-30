@@ -1,0 +1,3 @@
+id,reactants>reagents>production
+uspto_mit_train_000000,[CH3:1][CH2:2][CH2:3]Cl>>[CH3:1][CH2:2][CH3:3]
+uspto_mit_train_000001,[CH3:4][CH2:5][CH2:6]Br>>[CH3:4][CH2:5][CH3:6]

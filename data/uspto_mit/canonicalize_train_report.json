@@ -1,0 +1,7 @@
+{
+  "mode": "train",
+  "rows_read": 2,
+  "rows_kept": 2,
+  "rows_rejected": 0,
+  "rejection_counts_by_reason": {}
+}

@@ -1,0 +1,7 @@
+{
+  "mode": "train",
+  "input_file": "data\\uspto_mit\\canonicalized_train.csv",
+  "counts_read": 2,
+  "counts_kept": null,
+  "coverage": null
+}

@@ -1,0 +1,10 @@
+{
+  "mode": "valid",
+  "input_file": "data\\uspto_mit\\canonicalized_valid.csv",
+  "counts_read": 1,
+  "counts_kept": null,
+  "coverage": {
+    "covered": 1,
+    "total": 1
+  }
+}

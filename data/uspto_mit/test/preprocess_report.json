@@ -1,0 +1,10 @@
+{
+  "mode": "test",
+  "input_file": "data\\uspto_mit\\canonicalized_test.csv",
+  "counts_read": 1,
+  "counts_kept": null,
+  "coverage": {
+    "covered": 1,
+    "total": 1
+  }
+}

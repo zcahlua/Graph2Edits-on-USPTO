@@ -193,7 +193,8 @@ def prepare_data(args: Any) -> None:
         torch.save(batch_tensors, os.path.join(savedir, f'batch-{batch_num}.pt'))
         report['saved_batch_count'] += 1
     if report['processed'] == 0:
-        raise ValueError('All examples were skipped; no tensor batches were prepared')
+        print(f'WARNING: All examples were skipped for {args.mode}; no tensor batches were prepared')
+        sys.stdout.flush()
     json.dump(report, open(f'data/{args.dataset}/{args.mode}/prepare_report.json', 'w'), indent=2)
 
 

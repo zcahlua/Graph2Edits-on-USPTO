@@ -103,6 +103,8 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]):
     if args.kekulize:
         save_file += '.kekulized'
 
+    saved_count = 0
+    coverage = None
     if args.mode == 'train':
         for idx, rxn_data in enumerate(rxns_data):
             for edit in rxn_data.edits:
@@ -148,7 +150,6 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]):
         joblib.dump(bond_edits, os.path.join(savedir, 'bond_vocab.txt'))
         joblib.dump(lg_edits, os.path.join(savedir, 'lg_vocab.txt'))
         joblib.dump(atom_lg_edits, os.path.join(savedir, 'atom_lg_vocab.txt'))
-        coverage = None
         saved_count = len(filter_rxns_data)
     else:
         bond_vocab_file = f'data/{args.dataset}/train/bond_vocab.txt'
@@ -172,7 +173,8 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]):
 
         print(Counter(counter))
         print(f'The cover rate is {cover_num}/{len(rxns_data)}')
-        args._coverage = {'covered': cover_num, 'total': len(rxns_data)}
+        coverage = {'covered': cover_num, 'total': len(rxns_data)}
+        args._coverage = coverage
         joblib.dump(rxns_data, save_file, compress=3)
         saved_count = len(rxns_data)
 
