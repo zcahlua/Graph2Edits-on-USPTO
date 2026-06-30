@@ -9,6 +9,9 @@ from rdkit import Chem
 import os
 import argparse
 import pandas as pd
+import json
+from collections import Counter
+from utils.dataset_config import RXN_KEY
 
 
 def canonicalize_prod(p):
@@ -114,37 +117,47 @@ def remap_rxn_smi(rxn_smi):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='USPTO_50k',
-                        help='dataset: USPTO_50k or USPTO_full')
+                        help='dataset: USPTO_50k, USPTO_full, or uspto_mit')
     parser.add_argument('--mode', type=str, default='train',
                         help='Type of dataset being prepared: train or valid or test')
     args = parser.parse_args()
 
     args.dataset = args.dataset.lower()
-    datadir = f'data/{args.dataset}/'
-    new_file = f'canonicalized_{args.mode}.csv'
-    filename = f'raw_{args.mode}.csv'
+    datadir = 'data/%s/' % args.dataset
+    new_file = 'canonicalized_%s.csv' % args.mode
+    filename = 'raw_%s.csv' % args.mode
     df = pd.read_csv(os.path.join(datadir, filename))
-    print(f"Processing file of size: {len(df)}")
+    print("Processing file of size: %d" % len(df))
 
-    if args.dataset == 'uspto_50k':
-        new_dict = {'id': [], 'class': [], 'reactants>reagents>production': []}
-    else:
-        new_dict = {'id': [], 'reactants>reagents>production': []}
+    cols = ['id']
+    if 'class' in df.columns:
+        cols.append('class')
+    cols.append(RXN_KEY)
+    new_rows = []
+    rejected = []
+    reasons = Counter()
     for idx in range(len(df)):
         element = df.loc[idx]
-        if args.dataset == 'uspto_50k':
-            uspto_id, class_id, rxn_smi = element['id'], element['class'], element['reactants>reagents>production']
-        else:
-            uspto_id, rxn_smi = element['id'], element['reactants>reagents>production']
-
-        rxn_smi_new, _ = remap_rxn_smi(rxn_smi)
-        new_dict['id'].append(uspto_id)
-        if args.dataset == 'uspto_50k':
-            new_dict['class'].append(class_id)
-        new_dict['reactants>reagents>production'].append(rxn_smi_new)
-
-    new_df = pd.DataFrame.from_dict(new_dict)
-    new_df.to_csv(os.path.join(datadir, new_file), index=False)
+        try:
+            rxn_smi = element[RXN_KEY]
+            rxn_smi_new, _ = remap_rxn_smi(rxn_smi)
+            if rxn_smi_new is None:
+                raise ValueError('canonicalization returned no reaction')
+            row = {'id': element['id'], RXN_KEY: rxn_smi_new}
+            if 'class' in df.columns:
+                row['class'] = element['class']
+            new_rows.append(row)
+        except Exception as exc:
+            reason = str(exc)
+            reasons[reason] += 1
+            row = element.to_dict()
+            row['reason'] = reason
+            rejected.append(row)
+    pd.DataFrame(new_rows, columns=cols).to_csv(os.path.join(datadir, new_file), index=False)
+    pd.DataFrame(rejected).to_csv(os.path.join(datadir, 'canonicalize_%s_rejected.csv' % args.mode), index=False)
+    report = {'mode': args.mode, 'rows_read': int(len(df)), 'rows_kept': len(new_rows),
+              'rows_rejected': len(rejected), 'rejection_counts_by_reason': dict(reasons)}
+    json.dump(report, open(os.path.join(datadir, 'canonicalize_%s_report.json' % args.mode), 'w'), indent=2)
 
 
 if __name__ == "__main__":

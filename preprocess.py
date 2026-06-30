@@ -1,14 +1,16 @@
 import argparse
 import os
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Any, List
 
 import joblib
 import pandas as pd
+import json
 from rdkit import Chem
 
 from utils.generate_edits import generate_reaction_edits
+from utils.dataset_config import RXN_KEY, input_csv_path, is_large_dataset, add_bool_arg, validate_rxn_class
 
 
 def check_edits(edits: List):
@@ -51,12 +53,10 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
             continue
 
         try:
-            if args.dataset == 'uspto_50k':
-                rxn_data = generate_reaction_edits(rxn_smi, kekulize=args.kekulize, rxn_class=int(
-                    rxn_classes[idx]) - 1, rxn_id=rxns_id[idx])
+            if args.use_rxn_class:
+                rxn_data = generate_reaction_edits(rxn_smi, kekulize=args.kekulize, rxn_class=int(rxn_classes[idx]) - 1, rxn_id=rxns_id[idx])
             else:
-                rxn_data = generate_reaction_edits(
-                    rxn_smi, kekulize=args.kekulize)
+                rxn_data = generate_reaction_edits(rxn_smi, kekulize=args.kekulize, rxn_id=rxns_id[idx] if len(rxns_id) > idx else None)
         except:
             print(f'Failed to extract reaction data, skipping reaction {idx}')
             print()
@@ -103,27 +103,14 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
         lg_edits = []
         atom_lg_edits = []
 
-        if args.dataset == 'uspto_50k':
-            for edit, num in all_edits.items():
-                if edit[0] == 'Change Atom':
-                    atom_edits.append(edit)
-                    atom_lg_edits.append(edit)
-                elif edit[0] == 'Delete Bond' or edit[0] == 'Change Bond' or edit[0] == 'Add Bond':
-                    bond_edits.append(edit)
-                elif edit[0] == 'Attaching LG':
-                    lg_edits.append(edit)
-            atom_lg_edits.extend(lg_edits)
-
-        elif args.dataset == 'uspto_full':
-            for edit, num in all_edits.items():
-                if edit[0] == 'Change Atom':
-                    atom_edits.append(edit)
-                    atom_lg_edits.append(edit)
-                elif edit[0] == 'Delete Bond' or edit[0] == 'Change Bond' or edit[0] == 'Add Bond':
-                    bond_edits.append(edit)
-                elif edit[0] == 'Attaching LG' and num >= 50:
-                    lg_edits.append(edit)
-            atom_lg_edits.extend(lg_edits)
+        for edit, num in all_edits.items():
+            if edit[0] == 'Change Atom':
+                atom_edits.append(edit); atom_lg_edits.append(edit)
+            elif edit[0] in ('Delete Bond', 'Change Bond', 'Add Bond'):
+                bond_edits.append(edit)
+            elif edit[0] == 'Attaching LG' and num >= args.lg_min_count:
+                lg_edits.append(edit)
+        atom_lg_edits.extend(lg_edits)
 
         print(atom_edits)
         print(bond_edits)
@@ -169,6 +156,7 @@ def preprocessing(rxns: List, args: Any, rxn_classes: List = [], rxns_id=[]) -> 
 
         print(Counter(counter))
         print(f'The cover rate is {cover_num}/{len(rxns_data)}')
+        args._coverage = {'covered': cover_num, 'total': len(rxns_data)}
         joblib.dump(rxns_data, save_file, compress=3)
 
 
@@ -182,20 +170,26 @@ def main():
                         default=1000, help='Print during preprocessing')
     parser.add_argument('--kekulize', default=True, action='store_true',
                         help='Whether to kekulize mols during training')
+    parser.add_argument('--input_stage', choices=['auto','raw','canonicalized'], default='auto')
+    parser.add_argument('--lg_min_count', type=int, default=None)
+    add_bool_arg(parser, '--use_rxn_class', default=False, help='Whether to use rxn_class')
     args = parser.parse_args()
 
     args.dataset = args.dataset.lower()
-    datadir = f'data/{args.dataset}/'
-    rxn_key = 'reactants>reagents>production'
-    if args.dataset == 'uspto_50k':
-        filename = f'canonicalized_{args.mode}.csv'
-        df = pd.read_csv(os.path.join(datadir, filename))
-        preprocessing(rxns=df[rxn_key], args=args,
-                      rxn_classes=df['class'], rxns_id=df['id'])
-    else:
-        filename = f'raw_{args.mode}.csv'
-        df = pd.read_csv(os.path.join(datadir, filename))
-        preprocessing(rxns=df[rxn_key], args=args)
+    if args.lg_min_count is None:
+        args.lg_min_count = 50 if is_large_dataset(args.dataset) else 1
+    try:
+        validate_rxn_class(args.dataset, args.use_rxn_class)
+    except ValueError as exc:
+        parser.error(str(exc))
+    filename = input_csv_path(args.dataset, args.mode, args.input_stage)
+    df = pd.read_csv(filename)
+    rxn_classes = df['class'] if args.use_rxn_class else []
+    rxn_ids = df['id'] if 'id' in df.columns else []
+    preprocessing(rxns=df[RXN_KEY], args=args, rxn_classes=rxn_classes, rxns_id=rxn_ids)
+    report = {'mode': args.mode, 'input_file': filename, 'counts_read': int(len(df)), 'counts_kept': None, 'coverage': getattr(args, '_coverage', None)}
+    os.makedirs('data/%s/%s' % (args.dataset, args.mode), exist_ok=True)
+    json.dump(report, open('data/%s/%s/preprocess_report.json' % (args.dataset, args.mode), 'w'), indent=2)
 
 
 if __name__ == '__main__':

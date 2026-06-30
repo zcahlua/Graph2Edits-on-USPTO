@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import joblib
+import shutil
 from datetime import datetime as dt
 
 import torch
@@ -14,6 +15,7 @@ from models.model_utils import CSVLogger, get_seq_edit_accuracy
 from utils.datasets import RetroEditDataset, RetroEvalDataset
 from utils.mol_features import ATOM_FDIM, BOND_FDIM
 from utils.rxn_graphs import Vocab
+from utils.dataset_config import add_bool_arg, validate_rxn_class
 
 lg = RDLogger.logger()
 lg.setLevel(RDLogger.CRITICAL)
@@ -46,14 +48,15 @@ def build_model_config(args):
     return model_config
 
 
-def save_checkpoint(model, path, epoch):
-    save_dict = {'state': model.state_dict()}
+def save_checkpoint(model, path, epoch, valid_acc=None, valid_first_step_acc=None):
+    save_dict = {'state': model.state_dict(), 'epoch': epoch + 1, 'validation_accuracy': valid_acc, 'validation_first_step_accuracy': valid_first_step_acc}
     if hasattr(model, 'get_saveables'):
         save_dict['saveables'] = model.get_saveables()
 
     name = f'epoch_{epoch + 1}.pt'
     save_file = os.path.join(path, name)
     torch.save(save_dict, save_file)
+    return save_file
 
 
 def train_epoch(args, epoch, model, train_data, loss_fn, optimizer):
@@ -118,9 +121,9 @@ def test(model, valid_data):
                     total_accuracy += 1.0
                 if edits[0] == edits_batch[idx][0] and edits_atom[0] == edits_atom_batch[idx][0]:
                     first_step_accuracy += 1.0
-    valid_acc = float('%.4f' % (total_accuracy/len(valid_data)))
-    valid_first_step_acc = float(
-        '%.4f' % (first_step_accuracy/len(valid_data)))
+    denom = len(valid_data.dataset) if hasattr(valid_data, 'dataset') else len(valid_data)
+    valid_acc = float('%.4f' % (total_accuracy/denom))
+    valid_first_step_acc = float('%.4f' % (first_step_accuracy/denom))
 
     return valid_acc, valid_first_step_acc
 
@@ -200,13 +203,15 @@ def main(args):
         }
         csv_logger.writerow(row)
 
+        latest_file = save_checkpoint(model, out_dir, epoch, valid_acc, valid_first_step_acc)
+        shutil.copyfile(latest_file, os.path.join(out_dir, 'latest.pt'))
         # update the best accuracy for saving checkpoints
         if valid_acc >= best_acc:
             print(
                 f'Best eval accuracy so far. Saving best model from epoch {epoch + 1} (acc={valid_acc})')
             print('---------------------------------------------------------')
             print()
-            save_checkpoint(model, out_dir, epoch)
+            shutil.copyfile(latest_file, os.path.join(out_dir, 'best.pt'))
             best_acc = valid_acc
 
     csv_logger.close()
@@ -217,8 +222,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='uspto_50k',
                         help='dataset: uspto_50k or uspto_full')
-    parser.add_argument('--use_rxn_class', default=False,
-                        action='store_true', help='Whether to use rxn_class')
+    add_bool_arg(parser, '--use_rxn_class', default=False, help='Whether to use rxn_class')
     parser.add_argument('--atom_message', default=False, action='store_true',
                         help='Node-level or Bond-level message passing')
     parser.add_argument('--use_attn', default=False,
@@ -249,8 +253,14 @@ if __name__ == '__main__':
                         help='Maximum number of gradient clip')
     parser.add_argument('--print_every', type=int,
                         default=200, help='Print during train process')
-    parser.add_argument('--num_workers', default=6,
+    parser.add_argument('--num_workers', type=int, default=6,
                         help='Number of processes for data loading')
 
-    args = parser.parse_args().__dict__
+    ns = parser.parse_args()
+    ns.dataset = ns.dataset.lower()
+    try:
+        validate_rxn_class(ns.dataset, ns.use_rxn_class)
+    except ValueError as exc:
+        parser.error(str(exc))
+    args = ns.__dict__
     main(args)
